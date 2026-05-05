@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -18,6 +19,8 @@ type Message = {
   role: "user" | "counselor";
   text: string;
 };
+
+const CHAT_STORAGE_KEY = "counselor_local_chat_messages";
 
 const starterPrompts = [
   "I need to talk.",
@@ -247,19 +250,59 @@ export default function ChatScreen() {
   const [inputValue, setInputValue] = useState("");
   const [isCounselorTyping, setIsCounselorTyping] = useState(false);
   const [typingVisible, setTypingVisible] = useState(false);
+  const [hasLoadedMessages, setHasLoadedMessages] = useState(false);
 
   const scrollViewRef = useRef<ScrollView | null>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
+    loadSavedMessages();
+
     return () => {
-      timeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+      clearPendingTimeouts();
     };
   }, []);
 
   useEffect(() => {
+    if (!hasLoadedMessages) {
+      return;
+    }
+
+    saveMessages(messages);
+  }, [messages, hasLoadedMessages]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, isCounselorTyping, typingVisible]);
+
+  const loadSavedMessages = async () => {
+    try {
+      const savedMessages = await AsyncStorage.getItem(CHAT_STORAGE_KEY);
+
+      if (savedMessages) {
+        const parsedMessages = JSON.parse(savedMessages);
+
+        if (Array.isArray(parsedMessages)) {
+          setMessages(parsedMessages);
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to load saved chat messages:", error);
+    } finally {
+      setHasLoadedMessages(true);
+    }
+  };
+
+  const saveMessages = async (messagesToSave: Message[]) => {
+    try {
+      await AsyncStorage.setItem(
+        CHAT_STORAGE_KEY,
+        JSON.stringify(messagesToSave),
+      );
+    } catch (error) {
+      console.warn("Failed to save chat messages:", error);
+    }
+  };
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -267,9 +310,28 @@ export default function ChatScreen() {
     });
   };
 
+  const clearPendingTimeouts = () => {
+    timeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+    timeoutsRef.current = [];
+  };
+
   const addTimeout = (callback: () => void, delay: number) => {
     const timeout = setTimeout(callback, delay);
     timeoutsRef.current.push(timeout);
+  };
+
+  const startNewChat = async () => {
+    clearPendingTimeouts();
+    setMessages([]);
+    setInputValue("");
+    setIsCounselorTyping(false);
+    setTypingVisible(false);
+
+    try {
+      await AsyncStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch (error) {
+      console.warn("Failed to clear saved chat messages:", error);
+    }
   };
 
   const sendMessage = (customMessage?: string) => {
@@ -337,14 +399,28 @@ export default function ChatScreen() {
             <Text style={styles.headerTitle}>Private conversation</Text>
           </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.upgradeButton,
-              pressed && styles.upgradeButtonPressed,
-            ]}
-          >
-            <Text style={styles.upgradeButtonText}>Upgrade</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            {messages.length > 0 && (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.newChatButton,
+                  pressed && styles.newChatButtonPressed,
+                ]}
+                onPress={startNewChat}
+              >
+                <Text style={styles.newChatButtonText}>New</Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.upgradeButton,
+                pressed && styles.upgradeButtonPressed,
+              ]}
+            >
+              <Text style={styles.upgradeButtonText}>Upgrade</Text>
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView
@@ -438,6 +514,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     gap: 14,
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   appLabel: {
     color: colors.primarySoft,
     fontSize: 12,
@@ -464,6 +545,23 @@ const styles = StyleSheet.create({
   },
   upgradeButtonText: {
     color: colors.amberSoft,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  newChatButton: {
+    backgroundColor: colors.panelIndigo,
+    borderColor: colors.indigo,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    paddingHorizontal: 13,
+  },
+  newChatButtonPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.98 }],
+  },
+  newChatButtonText: {
+    color: colors.indigoSoft,
     fontSize: 13,
     fontWeight: "900",
   },
