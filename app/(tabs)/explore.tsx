@@ -14,7 +14,7 @@ export default function CoreScreen() {
         <Text style={styles.appLabel}>COUNSELOR CORE</Text>
 
         <Text style={styles.heroTitle}>
-          Not soft. Not cruel. <Text style={styles.yellowText}>Honest.</Text>
+          Not soft. Not cruel. <Text style={styles.amberText}>Honest.</Text>
         </Text>
 
         <Text style={styles.heroText}>
@@ -42,8 +42,8 @@ export default function CoreScreen() {
             </Text>
           </View>
 
-          <View style={[styles.traitCard, styles.traitCardBlue]}>
-            <Text style={[styles.traitTitle, styles.traitTitleBlue]}>
+          <View style={[styles.traitCard, styles.traitCardIndigo]}>
+            <Text style={[styles.traitTitle, styles.traitTitleIndigo]}>
               Loyal to you
             </Text>
             <Text style={styles.traitText}>
@@ -51,8 +51,8 @@ export default function CoreScreen() {
             </Text>
           </View>
 
-          <View style={[styles.traitCard, styles.traitCardYellow]}>
-            <Text style={[styles.traitTitle, styles.traitTitleYellow]}>
+          <View style={[styles.traitCard, styles.traitCardAmber]}>
+            <Text style={[styles.traitTitle, styles.traitTitleAmber]}>
               Sharp, sometimes sarcastic
             </Text>
             <Text style={styles.traitText}>
@@ -113,24 +113,25 @@ export default function CoreScreen() {
 }
 
 const colors = {
-  background: "#050507",
-  panel: "#0d0d12",
-  panelSoft: "#13131b",
-  panelRed: "#1a080d",
-  panelBlue: "#07151d",
-  panelYellow: "#1d1706",
-  border: "#24202b",
-  borderRed: "#ff304f",
-  borderBlue: "#18d7ff",
-  borderYellow: "#ffd166",
-  red: "#ff304f",
-  redSoft: "#ff6b7f",
-  blueSoft: "#8eeaff",
-  yellow: "#ffd166",
-  yellowSoft: "#ffe29a",
-  text: "#f5f2f4",
-  muted: "#aaa3ad",
-  dim: "#77717f",
+  background: "#070812",
+  panel: "#11131c",
+  panelSoft: "#171a26",
+  panelPrimary: "#24141b",
+  panelIndigo: "#13162a",
+  panelAmber: "#241d10",
+  panelTeal: "#0f2524",
+  border: "#272b3a",
+  borderStrong: "#383d52",
+  primary: "#e85d75",
+  primarySoft: "#ff8fa3",
+  indigo: "#7c8cff",
+  indigoSoft: "#aeb7ff",
+  amber: "#f2b84b",
+  amberSoft: "#ffd98a",
+  teal: "#2dd4bf",
+  tealSoft: "#8ff3e6",
+  text: "#f4f1f4",
+  muted: "#b2adbb",
 };
 
 const styles = StyleSheet.create({
@@ -149,15 +150,15 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     padding: 24,
     borderWidth: 1,
-    borderColor: colors.borderRed,
-    shadowColor: colors.red,
-    shadowOpacity: 0.25,
+    borderColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.18,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 10 },
     elevation: 8,
   },
   appLabel: {
-    color: colors.red,
+    color: colors.primarySoft,
     fontSize: 12,
     fontWeight: "900",
     letterSpacing: 2.4,
@@ -170,8 +171,8 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 16,
   },
-  yellowText: {
-    color: colors.yellow,
+  amberText: {
+    color: colors.amber,
   },
   heroText: {
     color: colors.muted,
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   sectionKicker: {
-    color: colors.red,
+    color: colors.primarySoft,
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 1.8,
@@ -210,31 +211,31 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   traitCard: {
-    backgroundColor: colors.panelSoft,
+    backgroundColor: colors.panelPrimary,
     borderRadius: 18,
     padding: 15,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.primary,
   },
-  traitCardBlue: {
-    backgroundColor: colors.panelBlue,
-    borderColor: colors.borderBlue,
+  traitCardIndigo: {
+    backgroundColor: colors.panelIndigo,
+    borderColor: colors.indigo,
   },
-  traitCardYellow: {
-    backgroundColor: colors.panelYellow,
-    borderColor: colors.borderYellow,
+  traitCardAmber: {
+    backgroundColor: colors.panelAmber,
+    borderColor: colors.amber,
   },
   traitTitle: {
-    color: colors.text,
+    color: colors.primarySoft,
     fontSize: 15,
     fontWeight: "900",
     marginBottom: 6,
   },
-  traitTitleBlue: {
-    color: colors.blueSoft,
+  traitTitleIndigo: {
+    color: colors.indigoSoft,
   },
-  traitTitleYellow: {
-    color: colors.yellowSoft,
+  traitTitleAmber: {
+    color: colors.amberSoft,
   },
   traitText: {
     color: colors.muted,
@@ -242,15 +243,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   ruleCard: {
-    backgroundColor: colors.panelRed,
+    backgroundColor: colors.panelTeal,
     borderRadius: 18,
     padding: 15,
     borderWidth: 1,
-    borderColor: colors.borderRed,
+    borderColor: colors.teal,
     marginBottom: 12,
   },
   ruleTitle: {
-    color: colors.redSoft,
+    color: colors.tealSoft,
     fontSize: 15,
     fontWeight: "900",
     marginBottom: 6,
@@ -261,14 +262,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   ruleCardMuted: {
-    backgroundColor: colors.panelYellow,
+    backgroundColor: colors.panelAmber,
     borderRadius: 18,
     padding: 15,
     borderWidth: 1,
-    borderColor: colors.borderYellow,
+    borderColor: colors.amber,
   },
   ruleTitleMuted: {
-    color: colors.yellowSoft,
+    color: colors.amberSoft,
     fontSize: 15,
     fontWeight: "900",
     marginBottom: 6,
@@ -279,14 +280,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   plusCard: {
-    backgroundColor: colors.panelBlue,
+    backgroundColor: colors.panelIndigo,
     borderRadius: 18,
     padding: 15,
     borderWidth: 1,
-    borderColor: colors.borderBlue,
+    borderColor: colors.indigo,
   },
   plusTitle: {
-    color: colors.blueSoft,
+    color: colors.indigoSoft,
     fontSize: 15,
     fontWeight: "900",
     marginBottom: 10,
