@@ -22,6 +22,8 @@ type Message = {
 
 const CHAT_STORAGE_KEY = "counselor_local_chat_messages";
 
+const LOCAL_SERVER_URL = "http://192.168.1.9:4000/chat";
+
 const starterPrompts = [
   "I need to talk.",
   "I’m overthinking.",
@@ -29,14 +31,10 @@ const starterPrompts = [
   "Help me think clearly.",
 ];
 
-const fakeReplies = [
-  "Alright, back up. Give me the backstory before we start pretending this is a clean decision.",
-  "Slow down. What actually happened here? Not the dramatic trailer version, the real version.",
-  "Before I call bullshit or back you up, I need context. Who did what, and what are you hoping happens next?",
-  "Okay. Tell me the ugly version first. What happened, what did you do, and what are you avoiding admitting?",
-  "Hold on. Are you trying to solve the problem, or are you trying to get a quick emotional hit? Give me the backstory.",
-  "Fine, but start from the beginning. I am not handing you advice based on half a sentence and panic.",
-  "Good. Say it properly. What happened, why does it still have a grip on you, and what do you want from this?",
+const fallbackReplies = [
+  "Backend is being annoying right now. Classic. Tell me the backstory anyway and we’ll keep moving.",
+  "The local server did not answer. Not the end of the world. Say the messy version first.",
+  "Connection failed. Before we blame the universe, check if the local server is running.",
 ];
 
 function AnimatedMessageBubble({ message }: { message: Message }) {
@@ -334,7 +332,45 @@ export default function ChatScreen() {
     }
   };
 
-  const sendMessage = (customMessage?: string) => {
+  const getFallbackReply = () => {
+    return fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)];
+  };
+
+  const getCounselorReplyFromServer = async (message: string) => {
+    const response = await fetch(LOCAL_SERVER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Server response was not OK.");
+    }
+
+    const data = await response.json();
+
+    if (!data.reply || typeof data.reply !== "string") {
+      throw new Error("Server did not return a valid reply.");
+    }
+
+    return data.reply;
+  };
+
+  const finishCounselorReply = (replyText: string) => {
+    const finalReply: Message = {
+      id: Date.now() + 1,
+      role: "counselor",
+      text: replyText,
+    };
+
+    setMessages((currentMessages) => [...currentMessages, finalReply]);
+    setIsCounselorTyping(false);
+    setTypingVisible(false);
+  };
+
+  const sendMessage = async (customMessage?: string) => {
     const trimmedMessage = (customMessage ?? inputValue).trim();
 
     if (!trimmedMessage || isCounselorTyping) {
@@ -347,12 +383,6 @@ export default function ChatScreen() {
       text: trimmedMessage,
     };
 
-    const finalReply: Message = {
-      id: Date.now() + 1,
-      role: "counselor",
-      text: fakeReplies[Math.floor(Math.random() * fakeReplies.length)],
-    };
-
     setMessages((currentMessages) => [...currentMessages, userMessage]);
     setInputValue("");
     setIsCounselorTyping(true);
@@ -360,29 +390,35 @@ export default function ChatScreen() {
 
     const shouldRethink = Math.random() > 0.82;
 
-    if (shouldRethink) {
-      addTimeout(() => {
-        setTypingVisible(false);
-      }, 950);
+    try {
+      const replyText = await getCounselorReplyFromServer(trimmedMessage);
+
+      if (shouldRethink) {
+        addTimeout(() => {
+          setTypingVisible(false);
+        }, 950);
+
+        addTimeout(() => {
+          setTypingVisible(true);
+        }, 1500);
+
+        addTimeout(() => {
+          finishCounselorReply(replyText);
+        }, 2850);
+
+        return;
+      }
 
       addTimeout(() => {
-        setTypingVisible(true);
-      }, 1500);
+        finishCounselorReply(replyText);
+      }, 850);
+    } catch (error) {
+      console.warn("Failed to get Counselor reply from local server:", error);
 
       addTimeout(() => {
-        setMessages((currentMessages) => [...currentMessages, finalReply]);
-        setIsCounselorTyping(false);
-        setTypingVisible(false);
-      }, 2850);
-
-      return;
+        finishCounselorReply(getFallbackReply());
+      }, 850);
     }
-
-    addTimeout(() => {
-      setMessages((currentMessages) => [...currentMessages, finalReply]);
-      setIsCounselorTyping(false);
-      setTypingVisible(false);
-    }, 850);
   };
 
   return (
