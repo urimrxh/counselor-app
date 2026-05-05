@@ -1,6 +1,8 @@
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -34,14 +36,246 @@ const fakeReplies = [
   "Good. Say it properly. What happened, why does it still have a grip on you, and what do you want from this?",
 ];
 
+function AnimatedMessageBubble({ message }: { message: Message }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(14)).current;
+  const scale = useRef(new Animated.Value(0.97)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        friction: 8,
+        tension: 90,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, scale, translateY]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.messageBubble,
+        message.role === "user" ? styles.userBubble : styles.counselorBubble,
+        {
+          opacity,
+          transform: [{ translateY }, { scale }],
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.messageText,
+          message.role === "user"
+            ? styles.userMessageText
+            : styles.counselorMessageText,
+        ]}
+      >
+        {message.text}
+      </Text>
+    </Animated.View>
+  );
+}
+
+function TypingBubble() {
+  const bubbleOpacity = useRef(new Animated.Value(0)).current;
+  const bubbleTranslateY = useRef(new Animated.Value(10)).current;
+
+  const dotOne = useRef(new Animated.Value(0.25)).current;
+  const dotTwo = useRef(new Animated.Value(0.25)).current;
+  const dotThree = useRef(new Animated.Value(0.25)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(bubbleOpacity, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(bubbleTranslateY, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    const animateDot = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 280,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0.25,
+            duration: 280,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.delay(260),
+        ]),
+      );
+
+    const animations = [
+      animateDot(dotOne, 0),
+      animateDot(dotTwo, 150),
+      animateDot(dotThree, 300),
+    ];
+
+    animations.forEach((animation) => animation.start());
+
+    return () => {
+      animations.forEach((animation) => animation.stop());
+    };
+  }, [bubbleOpacity, bubbleTranslateY, dotOne, dotThree, dotTwo]);
+
+  const getDotStyle = (dot: Animated.Value) => ({
+    opacity: dot,
+    transform: [
+      {
+        translateY: dot.interpolate({
+          inputRange: [0.25, 1],
+          outputRange: [2, -3],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.messageBubble,
+        styles.counselorBubble,
+        styles.typingBubble,
+        {
+          opacity: bubbleOpacity,
+          transform: [{ translateY: bubbleTranslateY }],
+        },
+      ]}
+    >
+      <View style={styles.typingDotsRow}>
+        <Animated.View style={[styles.typingDot, getDotStyle(dotOne)]} />
+        <Animated.View style={[styles.typingDot, getDotStyle(dotTwo)]} />
+        <Animated.View style={[styles.typingDot, getDotStyle(dotThree)]} />
+      </View>
+    </Animated.View>
+  );
+}
+
+function EmptyState({
+  onPromptPress,
+}: {
+  onPromptPress: (prompt: string) => void;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(16)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, translateY]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.emptyState,
+        {
+          opacity,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
+      <View style={styles.defaultVoiceBadge}>
+        <Text style={styles.defaultVoiceBadgeText}>DEFAULT VOICE</Text>
+      </View>
+
+      <Text style={styles.emptyTitle}>What’s actually on your mind?</Text>
+
+      <Text style={styles.emptyText}>
+        Say it messy. Counselor will pull the truth out of it.
+      </Text>
+
+      <View style={styles.promptGrid}>
+        {starterPrompts.map((prompt) => (
+          <Pressable
+            key={prompt}
+            style={({ pressed }) => [
+              styles.promptChip,
+              pressed && styles.promptChipPressed,
+            ]}
+            onPress={() => onPromptPress(prompt)}
+          >
+            <Text style={styles.promptChipText}>{prompt}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
+  const [isCounselorTyping, setIsCounselorTyping] = useState(false);
+  const [typingVisible, setTypingVisible] = useState(false);
+
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+    };
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isCounselorTyping, typingVisible]);
+
+  const scrollToBottom = () => {
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
+  };
+
+  const addTimeout = (callback: () => void, delay: number) => {
+    const timeout = setTimeout(callback, delay);
+    timeoutsRef.current.push(timeout);
+  };
 
   const sendMessage = (customMessage?: string) => {
     const trimmedMessage = (customMessage ?? inputValue).trim();
 
-    if (!trimmedMessage) {
+    if (!trimmedMessage || isCounselorTyping) {
       return;
     }
 
@@ -51,19 +285,42 @@ export default function ChatScreen() {
       text: trimmedMessage,
     };
 
-    const counselorMessage: Message = {
+    const finalReply: Message = {
       id: Date.now() + 1,
       role: "counselor",
       text: fakeReplies[Math.floor(Math.random() * fakeReplies.length)],
     };
 
-    setMessages((currentMessages) => [
-      ...currentMessages,
-      userMessage,
-      counselorMessage,
-    ]);
-
+    setMessages((currentMessages) => [...currentMessages, userMessage]);
     setInputValue("");
+    setIsCounselorTyping(true);
+    setTypingVisible(true);
+
+    const shouldRethink = Math.random() > 0.82;
+
+    if (shouldRethink) {
+      addTimeout(() => {
+        setTypingVisible(false);
+      }, 950);
+
+      addTimeout(() => {
+        setTypingVisible(true);
+      }, 1500);
+
+      addTimeout(() => {
+        setMessages((currentMessages) => [...currentMessages, finalReply]);
+        setIsCounselorTyping(false);
+        setTypingVisible(false);
+      }, 2850);
+
+      return;
+    }
+
+    addTimeout(() => {
+      setMessages((currentMessages) => [...currentMessages, finalReply]);
+      setIsCounselorTyping(false);
+      setTypingVisible(false);
+    }, 850);
   };
 
   return (
@@ -80,69 +337,36 @@ export default function ChatScreen() {
             <Text style={styles.headerTitle}>Private conversation</Text>
           </View>
 
-          <Pressable style={styles.upgradeButton}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.upgradeButton,
+              pressed && styles.upgradeButtonPressed,
+            ]}
+          >
             <Text style={styles.upgradeButtonText}>Upgrade</Text>
           </Pressable>
         </View>
 
         <ScrollView
+          ref={scrollViewRef}
           style={styles.chatArea}
           contentContainerStyle={[
             styles.chatContent,
             messages.length === 0 && styles.emptyChatContent,
           ]}
           keyboardShouldPersistTaps="handled"
+          onContentSizeChange={scrollToBottom}
+          showsVerticalScrollIndicator={false}
         >
           {messages.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={styles.defaultVoiceBadge}>
-                <Text style={styles.defaultVoiceBadgeText}>DEFAULT VOICE</Text>
-              </View>
-
-              <Text style={styles.emptyTitle}>
-                What’s actually on your mind?
-              </Text>
-
-              <Text style={styles.emptyText}>
-                Say it messy. Counselor will pull the truth out of it.
-              </Text>
-
-              <View style={styles.promptGrid}>
-                {starterPrompts.map((prompt) => (
-                  <Pressable
-                    key={prompt}
-                    style={styles.promptChip}
-                    onPress={() => sendMessage(prompt)}
-                  >
-                    <Text style={styles.promptChipText}>{prompt}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
+            <EmptyState onPromptPress={sendMessage} />
           ) : (
             <View style={styles.messageList}>
               {messages.map((message) => (
-                <View
-                  key={message.id}
-                  style={[
-                    styles.messageBubble,
-                    message.role === "user"
-                      ? styles.userBubble
-                      : styles.counselorBubble,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.messageText,
-                      message.role === "user"
-                        ? styles.userMessageText
-                        : styles.counselorMessageText,
-                    ]}
-                  >
-                    {message.text}
-                  </Text>
-                </View>
+                <AnimatedMessageBubble key={message.id} message={message} />
               ))}
+
+              {isCounselorTyping && typingVisible && <TypingBubble />}
             </View>
           )}
         </ScrollView>
@@ -157,7 +381,14 @@ export default function ChatScreen() {
             multiline
           />
 
-          <Pressable style={styles.sendButton} onPress={() => sendMessage()}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.sendButton,
+              pressed && styles.sendButtonPressed,
+              isCounselorTyping && styles.sendButtonDisabled,
+            ]}
+            onPress={() => sendMessage()}
+          >
             <Text style={styles.sendButtonText}>Send</Text>
           </Pressable>
         </View>
@@ -167,25 +398,26 @@ export default function ChatScreen() {
 }
 
 const colors = {
-  background: "#050507",
-  panel: "#0d0d12",
-  panelSoft: "#13131b",
-  panelRed: "#1a080d",
-  panelBlue: "#07151d",
-  panelYellow: "#1d1706",
-  border: "#24202b",
-  borderRed: "#ff304f",
-  borderBlue: "#18d7ff",
-  borderYellow: "#ffd166",
-  red: "#ff304f",
-  redSoft: "#ff6b7f",
-  blueSoft: "#8eeaff",
-  yellow: "#ffd166",
-  yellowSoft: "#ffe29a",
-  text: "#f5f2f4",
-  muted: "#aaa3ad",
-  dim: "#77717f",
-  black: "#09070a",
+  background: "#070812",
+  panel: "#11131c",
+  panelSoft: "#171a26",
+  panelPrimary: "#24141b",
+  panelIndigo: "#13162a",
+  panelAmber: "#241d10",
+  border: "#272b3a",
+  borderStrong: "#383d52",
+  primary: "#e85d75",
+  primarySoft: "#ff8fa3",
+  indigo: "#7c8cff",
+  indigoSoft: "#aeb7ff",
+  amber: "#f2b84b",
+  amberSoft: "#ffd98a",
+  teal: "#2dd4bf",
+  tealSoft: "#8ff3e6",
+  text: "#f4f1f4",
+  muted: "#b2adbb",
+  dim: "#7f7a8d",
+  black: "#090a10",
 };
 
 const styles = StyleSheet.create({
@@ -207,7 +439,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   appLabel: {
-    color: colors.red,
+    color: colors.primarySoft,
     fontSize: 12,
     fontWeight: "900",
     letterSpacing: 2.4,
@@ -219,15 +451,19 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   upgradeButton: {
-    backgroundColor: colors.panelYellow,
-    borderColor: colors.borderYellow,
+    backgroundColor: colors.panelAmber,
+    borderColor: colors.amber,
     borderWidth: 1,
     borderRadius: 999,
     paddingVertical: 9,
     paddingHorizontal: 14,
   },
+  upgradeButtonPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.98 }],
+  },
   upgradeButtonText: {
-    color: colors.yellowSoft,
+    color: colors.amberSoft,
     fontSize: 13,
     fontWeight: "900",
   },
@@ -246,8 +482,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   defaultVoiceBadge: {
-    backgroundColor: colors.panelBlue,
-    borderColor: colors.borderBlue,
+    backgroundColor: colors.panelIndigo,
+    borderColor: colors.indigo,
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 12,
@@ -255,7 +491,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   defaultVoiceBadgeText: {
-    color: colors.blueSoft,
+    color: colors.indigoSoft,
     fontSize: 11,
     fontWeight: "900",
     letterSpacing: 1.2,
@@ -287,6 +523,11 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     paddingHorizontal: 16,
   },
+  promptChipPressed: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.primary,
+    transform: [{ scale: 0.99 }],
+  },
   promptChipText: {
     color: colors.text,
     fontSize: 15,
@@ -303,7 +544,7 @@ const styles = StyleSheet.create({
   },
   userBubble: {
     alignSelf: "flex-end",
-    backgroundColor: colors.red,
+    backgroundColor: colors.primary,
     borderBottomRightRadius: 6,
   },
   counselorBubble: {
@@ -312,6 +553,21 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  typingBubble: {
+    minWidth: 64,
+    paddingVertical: 13,
+  },
+  typingDotsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  typingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: colors.muted,
   },
   messageText: {
     fontSize: 15,
@@ -329,7 +585,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     gap: 10,
     backgroundColor: colors.panel,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderWidth: 1,
     borderRadius: 24,
     padding: 10,
@@ -344,10 +600,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   sendButton: {
-    backgroundColor: colors.red,
+    backgroundColor: colors.primary,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  sendButtonPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
+  },
+  sendButtonDisabled: {
+    opacity: 0.45,
   },
   sendButtonText: {
     color: colors.black,

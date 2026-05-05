@@ -2,11 +2,11 @@ import { Tabs } from "expo-router";
 import React from "react";
 
 const colors = {
-  background: "#050507",
-  tabBar: "#0d0d12",
-  border: "#24202b",
-  red: "#ff304f",
-  muted: "#77717f",
+  background: "#070812",
+  tabBar: "#11131c",
+  border: "#272b3a",
+  active: "#e85d75",
+  inactive: "#7f7a8d",
 };
 
 export default function TabLayout() {
@@ -21,8 +21,8 @@ export default function TabLayout() {
           paddingTop: 8,
           paddingBottom: 10,
         },
-        tabBarActiveTintColor: colors.red,
-        tabBarInactiveTintColor: colors.muted,
+        tabBarActiveTintColor: colors.active,
+        tabBarInactiveTintColor: colors.inactive,
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: "800",
