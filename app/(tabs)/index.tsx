@@ -22,6 +22,7 @@ type Message = {
 
 const CHAT_STORAGE_KEY = "counselor_local_chat_messages";
 
+// Replace this IP with your own IPv4 address from `ipconfig` if it changes.
 const LOCAL_SERVER_URL = "http://192.168.1.9:4000/chat";
 
 const starterPrompts = [
@@ -278,10 +279,22 @@ export default function ChatScreen() {
       const savedMessages = await AsyncStorage.getItem(CHAT_STORAGE_KEY);
 
       if (savedMessages) {
-        const parsedMessages = JSON.parse(savedMessages);
+        const parsedMessages: unknown = JSON.parse(savedMessages);
 
         if (Array.isArray(parsedMessages)) {
-          setMessages(parsedMessages);
+          const validMessages = parsedMessages.filter(
+            (message): message is Message =>
+              typeof message === "object" &&
+              message !== null &&
+              "id" in message &&
+              "role" in message &&
+              "text" in message &&
+              typeof message.id === "number" &&
+              (message.role === "user" || message.role === "counselor") &&
+              typeof message.text === "string",
+          );
+
+          setMessages(validMessages);
         }
       }
     } catch (error) {
@@ -336,38 +349,89 @@ export default function ChatScreen() {
     return fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)];
   };
 
-  const getCounselorReplyFromServer = async (message: string) => {
+  const getCounselorRepliesFromServer = async (message: string) => {
     const response = await fetch(LOCAL_SERVER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        recentMessages: messages.slice(-8),
+      }),
     });
 
     if (!response.ok) {
       throw new Error("Server response was not OK.");
     }
 
-    const data = await response.json();
+    const data: unknown = await response.json();
 
-    if (!data.reply || typeof data.reply !== "string") {
-      throw new Error("Server did not return a valid reply.");
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "replies" in data &&
+      Array.isArray(data.replies)
+    ) {
+      const validReplies = data.replies.filter(
+        (reply): reply is string => typeof reply === "string",
+      );
+
+      if (validReplies.length > 0) {
+        return validReplies;
+      }
     }
 
-    return data.reply;
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "reply" in data &&
+      typeof data.reply === "string"
+    ) {
+      return [data.reply];
+    }
+
+    throw new Error("Server did not return a valid reply.");
   };
 
-  const finishCounselorReply = (replyText: string) => {
+  const addCounselorReply = (replyText: string) => {
     const finalReply: Message = {
-      id: Date.now() + 1,
+      id: Date.now() + Math.floor(Math.random() * 1000),
       role: "counselor",
       text: replyText,
     };
 
     setMessages((currentMessages) => [...currentMessages, finalReply]);
-    setIsCounselorTyping(false);
+  };
+
+  const finishCounselorReplies = (replyTexts: string[]) => {
+    const safeReplies = replyTexts
+      .map((reply) => reply.trim())
+      .filter((reply): reply is string => reply.length > 0);
+
+    const repliesToSend =
+      safeReplies.length > 0 ? safeReplies.slice(0, 2) : [getFallbackReply()];
+
     setTypingVisible(false);
+
+    addTimeout(() => {
+      addCounselorReply(repliesToSend[0]);
+
+      if (repliesToSend.length === 1) {
+        setIsCounselorTyping(false);
+        return;
+      }
+
+      addTimeout(() => {
+        setTypingVisible(true);
+      }, 650);
+
+      addTimeout(() => {
+        setTypingVisible(false);
+        addCounselorReply(repliesToSend[1]);
+        setIsCounselorTyping(false);
+      }, 1650);
+    }, 350);
   };
 
   const sendMessage = async (customMessage?: string) => {
@@ -388,10 +452,10 @@ export default function ChatScreen() {
     setIsCounselorTyping(true);
     setTypingVisible(true);
 
-    const shouldRethink = Math.random() > 0.82;
+    const shouldRethink = Math.random() > 0.86;
 
     try {
-      const replyText = await getCounselorReplyFromServer(trimmedMessage);
+      const replyTexts = await getCounselorRepliesFromServer(trimmedMessage);
 
       if (shouldRethink) {
         addTimeout(() => {
@@ -400,24 +464,24 @@ export default function ChatScreen() {
 
         addTimeout(() => {
           setTypingVisible(true);
-        }, 1500);
+        }, 1550);
 
         addTimeout(() => {
-          finishCounselorReply(replyText);
-        }, 2850);
+          finishCounselorReplies(replyTexts);
+        }, 3050);
 
         return;
       }
 
       addTimeout(() => {
-        finishCounselorReply(replyText);
-      }, 850);
+        finishCounselorReplies(replyTexts);
+      }, 1250);
     } catch (error) {
       console.warn("Failed to get Counselor reply from local server:", error);
 
       addTimeout(() => {
-        finishCounselorReply(getFallbackReply());
-      }, 850);
+        finishCounselorReplies([getFallbackReply()]);
+      }, 1250);
     }
   };
 
