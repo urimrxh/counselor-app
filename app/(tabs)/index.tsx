@@ -18,9 +18,17 @@ type Message = {
   id: number;
   role: "user" | "counselor";
   text: string;
+  createdAt: string;
 };
 
-const CHAT_STORAGE_KEY = "counselor_local_chat_messages";
+type Conversation = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
+};
+
+const ACTIVE_CONVERSATION_STORAGE_KEY = "counselor_active_conversation";
 
 // Replace this IP with your own IPv4 address from `ipconfig` if it changes.
 const LOCAL_SERVER_URL = "http://192.168.1.9:4000/chat";
@@ -37,6 +45,25 @@ const fallbackReplies = [
   "The local server did not answer. Not the end of the world. Say the messy version first.",
   "Connection failed. Before we blame the universe, check if the local server is running.",
 ];
+
+const createConversationId = () => {
+  return `conversation_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+};
+
+const createMessageId = () => {
+  return Date.now() + Math.floor(Math.random() * 100000);
+};
+
+const createEmptyConversation = (): Conversation => {
+  const now = new Date().toISOString();
+
+  return {
+    id: createConversationId(),
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+  };
+};
 
 function AnimatedMessageBubble({ message }: { message: Message }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -245,17 +272,21 @@ function EmptyState({
 }
 
 export default function ChatScreen() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeConversation, setActiveConversation] = useState<Conversation>(
+    createEmptyConversation(),
+  );
   const [inputValue, setInputValue] = useState("");
   const [isCounselorTyping, setIsCounselorTyping] = useState(false);
   const [typingVisible, setTypingVisible] = useState(false);
-  const [hasLoadedMessages, setHasLoadedMessages] = useState(false);
+  const [hasLoadedConversation, setHasLoadedConversation] = useState(false);
 
   const scrollViewRef = useRef<ScrollView | null>(null);
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  const messages = activeConversation.messages;
+
   useEffect(() => {
-    loadSavedMessages();
+    loadSavedConversation();
 
     return () => {
       clearPendingTimeouts();
@@ -263,55 +294,133 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedMessages) {
+    if (!hasLoadedConversation) {
       return;
     }
 
-    saveMessages(messages);
-  }, [messages, hasLoadedMessages]);
+    saveConversation(activeConversation);
+  }, [activeConversation, hasLoadedConversation]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isCounselorTyping, typingVisible]);
 
-  const loadSavedMessages = async () => {
+  const isValidMessage = (message: unknown): message is Message => {
+    return (
+      typeof message === "object" &&
+      message !== null &&
+      "id" in message &&
+      "role" in message &&
+      "text" in message &&
+      typeof message.id === "number" &&
+      (message.role === "user" || message.role === "counselor") &&
+      typeof message.text === "string"
+    );
+  };
+
+  const isValidConversation = (
+    conversation: unknown,
+  ): conversation is Conversation => {
+    return (
+      typeof conversation === "object" &&
+      conversation !== null &&
+      "id" in conversation &&
+      "createdAt" in conversation &&
+      "updatedAt" in conversation &&
+      "messages" in conversation &&
+      typeof conversation.id === "string" &&
+      typeof conversation.createdAt === "string" &&
+      typeof conversation.updatedAt === "string" &&
+      Array.isArray(conversation.messages)
+    );
+  };
+
+  const migrateOldMessagesToConversation = (
+    parsedValue: unknown,
+  ): Conversation | null => {
+    if (!Array.isArray(parsedValue)) {
+      return null;
+    }
+
+    const validMessages = parsedValue.filter(isValidMessage);
+
+    if (validMessages.length === 0) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+
+    return {
+      id: createConversationId(),
+      createdAt: now,
+      updatedAt: now,
+      messages: validMessages.map((message) => ({
+        ...message,
+        createdAt:
+          "createdAt" in message && typeof message.createdAt === "string"
+            ? message.createdAt
+            : now,
+      })),
+    };
+  };
+
+  const loadSavedConversation = async () => {
     try {
-      const savedMessages = await AsyncStorage.getItem(CHAT_STORAGE_KEY);
+      const savedConversation = await AsyncStorage.getItem(
+        ACTIVE_CONVERSATION_STORAGE_KEY,
+      );
 
-      if (savedMessages) {
-        const parsedMessages: unknown = JSON.parse(savedMessages);
+      if (savedConversation) {
+        const parsedConversation: unknown = JSON.parse(savedConversation);
 
-        if (Array.isArray(parsedMessages)) {
-          const validMessages = parsedMessages.filter(
-            (message): message is Message =>
-              typeof message === "object" &&
-              message !== null &&
-              "id" in message &&
-              "role" in message &&
-              "text" in message &&
-              typeof message.id === "number" &&
-              (message.role === "user" || message.role === "counselor") &&
-              typeof message.text === "string",
-          );
+        if (isValidConversation(parsedConversation)) {
+          const validMessages = parsedConversation.messages
+            .filter(isValidMessage)
+            .map((message) => ({
+              ...message,
+              createdAt:
+                "createdAt" in message && typeof message.createdAt === "string"
+                  ? message.createdAt
+                  : parsedConversation.createdAt,
+            }));
 
-          setMessages(validMessages);
+          setActiveConversation({
+            ...parsedConversation,
+            messages: validMessages,
+          });
+
+          return;
+        }
+      }
+
+      const oldSavedMessages = await AsyncStorage.getItem(
+        "counselor_local_chat_messages",
+      );
+
+      if (oldSavedMessages) {
+        const parsedOldMessages: unknown = JSON.parse(oldSavedMessages);
+        const migratedConversation =
+          migrateOldMessagesToConversation(parsedOldMessages);
+
+        if (migratedConversation) {
+          setActiveConversation(migratedConversation);
         }
       }
     } catch (error) {
-      console.warn("Failed to load saved chat messages:", error);
+      console.warn("Failed to load saved conversation:", error);
     } finally {
-      setHasLoadedMessages(true);
+      setHasLoadedConversation(true);
     }
   };
 
-  const saveMessages = async (messagesToSave: Message[]) => {
+  const saveConversation = async (conversationToSave: Conversation) => {
     try {
       await AsyncStorage.setItem(
-        CHAT_STORAGE_KEY,
-        JSON.stringify(messagesToSave),
+        ACTIVE_CONVERSATION_STORAGE_KEY,
+        JSON.stringify(conversationToSave),
       );
     } catch (error) {
-      console.warn("Failed to save chat messages:", error);
+      console.warn("Failed to save conversation:", error);
     }
   };
 
@@ -331,17 +440,37 @@ export default function ChatScreen() {
     timeoutsRef.current.push(timeout);
   };
 
+  const updateConversationMessages = (
+    updater: (currentMessages: Message[]) => Message[],
+  ) => {
+    setActiveConversation((currentConversation) => {
+      const updatedMessages = updater(currentConversation.messages);
+
+      return {
+        ...currentConversation,
+        updatedAt: new Date().toISOString(),
+        messages: updatedMessages,
+      };
+    });
+  };
+
   const startNewChat = async () => {
     clearPendingTimeouts();
-    setMessages([]);
+
+    const newConversation = createEmptyConversation();
+
+    setActiveConversation(newConversation);
     setInputValue("");
     setIsCounselorTyping(false);
     setTypingVisible(false);
 
     try {
-      await AsyncStorage.removeItem(CHAT_STORAGE_KEY);
+      await AsyncStorage.setItem(
+        ACTIVE_CONVERSATION_STORAGE_KEY,
+        JSON.stringify(newConversation),
+      );
     } catch (error) {
-      console.warn("Failed to clear saved chat messages:", error);
+      console.warn("Failed to start new chat:", error);
     }
   };
 
@@ -356,6 +485,7 @@ export default function ChatScreen() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        conversationId: activeConversation.id,
         message,
         recentMessages: messages.slice(-8),
       }),
@@ -396,12 +526,16 @@ export default function ChatScreen() {
 
   const addCounselorReply = (replyText: string) => {
     const finalReply: Message = {
-      id: Date.now() + Math.floor(Math.random() * 1000),
+      id: createMessageId(),
       role: "counselor",
       text: replyText,
+      createdAt: new Date().toISOString(),
     };
 
-    setMessages((currentMessages) => [...currentMessages, finalReply]);
+    updateConversationMessages((currentMessages) => [
+      ...currentMessages,
+      finalReply,
+    ]);
   };
 
   const finishCounselorReplies = (replyTexts: string[]) => {
@@ -442,12 +576,17 @@ export default function ChatScreen() {
     }
 
     const userMessage: Message = {
-      id: Date.now(),
+      id: createMessageId(),
       role: "user",
       text: trimmedMessage,
+      createdAt: new Date().toISOString(),
     };
 
-    setMessages((currentMessages) => [...currentMessages, userMessage]);
+    updateConversationMessages((currentMessages) => [
+      ...currentMessages,
+      userMessage,
+    ]);
+
     setInputValue("");
     setIsCounselorTyping(true);
     setTypingVisible(true);
@@ -508,7 +647,7 @@ export default function ChatScreen() {
                 ]}
                 onPress={startNewChat}
               >
-                <Text style={styles.newChatButtonText}>New</Text>
+                <Text style={styles.newChatButtonText}>New chat</Text>
               </Pressable>
             )}
 

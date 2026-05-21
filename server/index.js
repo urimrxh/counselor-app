@@ -866,7 +866,7 @@ app.get("/", (req, res) => {
 });
 
 app.post("/chat", async (req, res) => {
-  const { message, recentMessages } = req.body;
+  const { conversationId, message, recentMessages } = req.body;
 
   if (!message || typeof message !== "string") {
     return res.status(400).json({
@@ -875,6 +875,7 @@ app.post("/chat", async (req, res) => {
   }
 
   console.log("User message:", message);
+  console.log("Conversation ID:", conversationId || "Missing conversation ID");
 
   if (isSimpleGreeting(message)) {
     const greetingReply = getGreetingReply();
