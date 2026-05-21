@@ -847,7 +847,102 @@ const generateDryConversationReplies = async ({ message, recentMessages }) => {
     return getFallbackDryReplies();
   }
 };
+const detectMemoryCandidate = async ({ message, recentMessages }) => {
+  if (!openai) {
+    return null;
+  }
 
+  const safeRecentMessages = Array.isArray(recentMessages)
+    ? recentMessages.slice(-6)
+    : [];
+
+  const conversationText = safeRecentMessages
+    .map((item) => {
+      const role = item.role === "counselor" ? "Counselor" : "User";
+      return `${role}: ${item.text}`;
+    })
+    .join("\n");
+
+  try {
+    const response = await openai.responses.create({
+      model: OPENAI_MODEL,
+      instructions: `
+You classify whether a user message contains information worth remembering for future personalization.
+
+Return ONLY valid JSON.
+
+Remember only durable or useful personal context, such as:
+- important people: girlfriend, boyfriend, wife, husband, mother, father, sibling, close friend, family member
+- relationship context
+- work, school, exams, career goals
+- repeated fears, habits, struggles, goals
+- strong preferences that may matter later
+- important life events
+- long-term projects
+- important or really lovable objects like a pet, a car, a house, a song, a movie, a dream, a fictional character, a personage 
+
+Do NOT remember:
+- random one-time food mentions
+- throwaway jokes
+- temporary mood unless it is clearly part of a pattern
+- sensitive medical, political, religious, sexual, or highly private identity details unless the user clearly wants it remembered
+- exact secrets, passwords, API keys, addresses, or private credentials
+
+JSON shape:
+{
+  "remember": true,
+  "category": "relationship | family | work | study | goal | fear | habit | preference | project | life_event | other | none",
+  "summary": "short memory candidate written neutrally",
+  "reason": "short reason"
+}
+
+If not worth remembering:
+{
+  "remember": false,
+  "category": "none",
+  "summary": "",
+  "reason": "short reason"
+}
+`,
+      input: `
+Recent conversation:
+${conversationText || "No recent context."}
+
+Latest user message:
+${message}
+`,
+      max_output_tokens: 160,
+      store: false,
+    });
+
+    const rawText = response.output_text?.trim();
+
+    if (!rawText) {
+      return null;
+    }
+
+    const parsed = JSON.parse(
+      rawText
+        .replace(/^```json/i, "")
+        .replace(/^```/i, "")
+        .replace(/```$/i, "")
+        .trim(),
+    );
+
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof parsed.remember === "boolean"
+    ) {
+      return parsed;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Memory candidate detection failed:", error);
+    return null;
+  }
+};
 const splitReplyIntoMessages = (reply) => {
   return reply
     .split(/\n{2,}|\n(?=[a-zA-Z0-9])/)
@@ -876,6 +971,14 @@ app.post("/chat", async (req, res) => {
 
   console.log("User message:", message);
   console.log("Conversation ID:", conversationId || "Missing conversation ID");
+
+  detectMemoryCandidate({ message, recentMessages }).then((memoryCandidate) => {
+    if (!memoryCandidate) {
+      return;
+    }
+
+    console.log("Memory candidate:", memoryCandidate);
+  });
 
   if (isSimpleGreeting(message)) {
     const greetingReply = getGreetingReply();
