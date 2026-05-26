@@ -19,7 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 const fallbackReplies = [
-  "OpenAI is not connected yet, so I am still running on fallback replies. But fine, give me the backstory.",
+  "The brain is not plugged in yet, so I am running on fallback replies. But fine, give me the backstory.",
   "No API key found yet. The brain is not plugged in. Say the messy version anyway.",
   "Still in local fallback mode. Not glamorous, but it works. What actually happened?",
 ];
@@ -847,6 +847,57 @@ const generateDryConversationReplies = async ({ message, recentMessages }) => {
     return getFallbackDryReplies();
   }
 };
+
+const logMemoryCandidate = ({ conversationId, memoryCandidate }) => {
+  if (!memoryCandidate) {
+    return;
+  }
+
+  console.log("\n🧠 MEMORY CANDIDATE");
+  console.log("Conversation:", conversationId || "missing-conversation-id");
+  console.log("Remember:", memoryCandidate.remember);
+  console.log("Category:", memoryCandidate.category || "none");
+  console.log("Summary:", memoryCandidate.summary || "");
+  console.log("Reason:", memoryCandidate.reason || "");
+  console.log("────────────────────────────\n");
+};
+
+const parseMemoryCandidate = (rawText) => {
+  if (!rawText || typeof rawText !== "string") {
+    return null;
+  }
+
+  const cleanedText = rawText
+    .trim()
+    .replace(/^```json/i, "")
+    .replace(/^```/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleanedText);
+
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof parsed.remember === "boolean"
+    ) {
+      return {
+        remember: parsed.remember,
+        category:
+          typeof parsed.category === "string" ? parsed.category : "none",
+        summary: typeof parsed.summary === "string" ? parsed.summary : "",
+        reason: typeof parsed.reason === "string" ? parsed.reason : "",
+      };
+    }
+  } catch (error) {
+    console.warn("Could not parse memory candidate JSON:", cleanedText);
+    return null;
+  }
+
+  return null;
+};
+
 const detectMemoryCandidate = async ({ message, recentMessages }) => {
   if (!openai) {
     return null;
@@ -869,17 +920,24 @@ const detectMemoryCandidate = async ({ message, recentMessages }) => {
       instructions: `
 You classify whether a user message contains information worth remembering for future personalization.
 
-Return ONLY valid JSON.
+Return ONLY valid compact JSON. No markdown. No explanation.
+
+Use exactly this shape:
+{"remember":false,"category":"none","summary":"","reason":""}
+
+Allowed categories:
+relationship, family, work, study, goal, fear, habit, preference, project, life_event, other, none.
 
 Remember only durable or useful personal context, such as:
-- important people: girlfriend, boyfriend, wife, husband, mother, father, sibling, close friend, family member
+- important people: girlfriend, boyfriend, wife, husband, mother, father, sibling, close friend
 - relationship context
 - work, school, exams, career goals
 - repeated fears, habits, struggles, goals
 - strong preferences that may matter later
 - important life events
 - long-term projects
-- important or really lovable objects like a pet, a car, a house, a song, a movie, a dream, a fictional character, a personage 
+- Attraction preferences, religious beliefs
+- Mental health issues, drug use, alcohol use, smoking, etc.
 
 Do NOT remember:
 - random one-time food mentions
@@ -887,22 +945,6 @@ Do NOT remember:
 - temporary mood unless it is clearly part of a pattern
 - sensitive medical, political, religious, sexual, or highly private identity details unless the user clearly wants it remembered
 - exact secrets, passwords, API keys, addresses, or private credentials
-
-JSON shape:
-{
-  "remember": true,
-  "category": "relationship | family | work | study | goal | fear | habit | preference | project | life_event | other | none",
-  "summary": "short memory candidate written neutrally",
-  "reason": "short reason"
-}
-
-If not worth remembering:
-{
-  "remember": false,
-  "category": "none",
-  "summary": "",
-  "reason": "short reason"
-}
 `,
       input: `
 Recent conversation:
@@ -911,7 +953,7 @@ ${conversationText || "No recent context."}
 Latest user message:
 ${message}
 `,
-      max_output_tokens: 160,
+      max_output_tokens: 300,
       store: false,
     });
 
@@ -921,28 +963,24 @@ ${message}
       return null;
     }
 
-    const parsed = JSON.parse(
-      rawText
-        .replace(/^```json/i, "")
-        .replace(/^```/i, "")
-        .replace(/```$/i, "")
-        .trim(),
-    );
+    const parsedMemoryCandidate = parseMemoryCandidate(rawText);
 
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      typeof parsed.remember === "boolean"
-    ) {
-      return parsed;
+    if (parsedMemoryCandidate) {
+      return parsedMemoryCandidate;
     }
 
-    return null;
+    return {
+      remember: false,
+      category: "none",
+      summary: "",
+      reason: "Memory classifier returned invalid JSON.",
+    };
   } catch (error) {
     console.error("Memory candidate detection failed:", error);
     return null;
   }
 };
+
 const splitReplyIntoMessages = (reply) => {
   return reply
     .split(/\n{2,}|\n(?=[a-zA-Z0-9])/)
@@ -970,14 +1008,10 @@ app.post("/chat", async (req, res) => {
   }
 
   console.log("User message:", message);
-  console.log("Conversation ID:", conversationId || "Missing conversation ID");
+  console.log("Conversation ID:", conversationId || "missing-conversation-id");
 
   detectMemoryCandidate({ message, recentMessages }).then((memoryCandidate) => {
-    if (!memoryCandidate) {
-      return;
-    }
-
-    console.log("Memory candidate:", memoryCandidate);
+    logMemoryCandidate({ conversationId, memoryCandidate });
   });
 
   if (isSimpleGreeting(message)) {
