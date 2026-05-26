@@ -19,6 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 const localMemoryCandidateQueue = [];
+const localMemoryItems = [];
 
 const fallbackReplies = [
   "The brain is not plugged in yet, so I am running on fallback replies. But fine, give me the backstory.",
@@ -118,7 +119,7 @@ const dryMessagePatterns = [
 ];
 
 const counselorInstructions = `
-You are Counselor, a private AI companion for honest conversations.
+You are Counselor, a private companion for honest conversations.
 
 Never refer to yourself as AI, an AI, a bot, a chatbot, a model, a language model, an assistant, software, or a program.
 Never say "as an AI".
@@ -212,6 +213,14 @@ For unclear emotional messages: ask 1 sharp question.
 For serious context: 2 to 5 short sentences maximum.
 If the user writes a long message with real context, you may follow the pace with a more complete reply, but stay human and do not write an essay.
 Do not use bullet points unless the user asks for steps, options, or a list.
+
+Memory usage rule:
+You may receive relevant remembered context.
+Use it naturally when it helps the reply.
+Do not mention that you are using memory.
+Do not say "I remember" unless it sounds human and useful.
+Do not expose memory system details.
+Do not use remembered context if it is irrelevant to the latest message.
 
 Important behaviour rules:
 1. If the user gives a vague emotional statement, do not give a final answer immediately. Ask for the backstory.
@@ -589,7 +598,7 @@ const analyseUserStyle = ({ message, recentMessages }) => {
   return styleNotes.join("\n");
 };
 
-const buildInput = ({ message, recentMessages }) => {
+const buildInput = ({ message, recentMessages, memoryContext }) => {
   const safeRecentMessages = Array.isArray(recentMessages)
     ? recentMessages.slice(-8)
     : [];
@@ -610,6 +619,9 @@ ${conversationText || "No previous messages in this local request."}
 Detected user style:
 ${userStyleNotes}
 
+Relevant remembered context:
+${memoryContext || "No accepted memories for this conversation yet."}
+
 Latest user message:
 ${message}
 
@@ -624,6 +636,7 @@ Hard output rules:
 - If context is missing, ask for the backstory.
 - If the user wrote a long message with real context, you can reply with more context, but keep it human.
 - If the user says they are trying to do something, usually suggest a practical move instead of asking another question.
+- Use remembered context naturally if it is relevant, but do not mention memory system details.
 - Do not end every reply with a question.
 - Do not write an essay.
 - Do not sound soft.
@@ -995,6 +1008,85 @@ const getMemoryDecision = (memoryCandidate) => {
   };
 };
 
+const normalizeMemorySummary = (summary) => {
+  return summary.toLowerCase().trim().replace(/\s+/g, " ");
+};
+
+const memoryAlreadyExists = ({ conversationId, category, summary }) => {
+  const normalizedSummary = normalizeMemorySummary(summary);
+
+  return localMemoryItems.some((item) => {
+    return (
+      item.conversationId === (conversationId || "missing-conversation-id") &&
+      item.category === category &&
+      normalizeMemorySummary(item.summary) === normalizedSummary
+    );
+  });
+};
+
+const addAcceptedMemoryItem = ({
+  conversationId,
+  memoryCandidate,
+  sourceMessage,
+}) => {
+  if (!memoryCandidate?.summary) {
+    return null;
+  }
+
+  if (
+    memoryAlreadyExists({
+      conversationId,
+      category: memoryCandidate.category,
+      summary: memoryCandidate.summary,
+    })
+  ) {
+    return null;
+  }
+
+  const memoryItem = {
+    id: `memory_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+    conversationId: conversationId || "missing-conversation-id",
+    category: memoryCandidate.category,
+    importance: memoryCandidate.importance,
+    confidence: memoryCandidate.confidence,
+    sensitivity: memoryCandidate.sensitivity,
+    summary: memoryCandidate.summary,
+    sourceMessage,
+    createdAt: new Date().toISOString(),
+  };
+
+  localMemoryItems.push(memoryItem);
+
+  if (localMemoryItems.length > 100) {
+    localMemoryItems.shift();
+  }
+
+  console.log("\n✅ ACCEPTED MEMORY STORED");
+  console.log("Conversation:", memoryItem.conversationId);
+  console.log("Category:", memoryItem.category);
+  console.log("Importance:", memoryItem.importance);
+  console.log("Summary:", memoryItem.summary);
+  console.log("Memory count:", localMemoryItems.length);
+  console.log("────────────────────────────\n");
+
+  return memoryItem;
+};
+
+const getRelevantMemoryContext = ({ conversationId }) => {
+  const relevantMemories = localMemoryItems
+    .filter(
+      (item) =>
+        item.conversationId === (conversationId || "missing-conversation-id"),
+    )
+    .slice(-8);
+
+  if (relevantMemories.length === 0) {
+    return "No accepted memories for this conversation yet.";
+  }
+
+  return relevantMemories.map((item) => `- ${item.summary}`).join("\n");
+};
+
 const enqueueMemoryCandidate = ({
   conversationId,
   message,
@@ -1060,6 +1152,14 @@ const processMemoryCandidate = ({
     memoryCandidate,
     decision,
   });
+
+  if (decision.status === "accepted") {
+    addAcceptedMemoryItem({
+      conversationId,
+      memoryCandidate,
+      sourceMessage: message,
+    });
+  }
 
   logMemoryCandidate({
     conversationId,
@@ -1199,6 +1299,13 @@ app.get("/debug/memory-candidates", (req, res) => {
   });
 });
 
+app.get("/debug/memories", (req, res) => {
+  res.json({
+    count: localMemoryItems.length,
+    memories: localMemoryItems,
+  });
+});
+
 app.post("/chat", async (req, res) => {
   const { conversationId, message, recentMessages } = req.body;
 
@@ -1276,11 +1383,12 @@ app.post("/chat", async (req, res) => {
 
   try {
     const latestMessageLength = message.trim().length;
+    const memoryContext = getRelevantMemoryContext({ conversationId });
 
     const response = await openai.responses.create({
       model: OPENAI_MODEL,
       instructions: counselorInstructions,
-      input: buildInput({ message, recentMessages }),
+      input: buildInput({ message, recentMessages, memoryContext }),
       max_output_tokens: latestMessageLength > 220 ? 260 : 180,
       store: false,
     });
