@@ -857,9 +857,44 @@ const logMemoryCandidate = ({ conversationId, memoryCandidate }) => {
   console.log("Conversation:", conversationId || "missing-conversation-id");
   console.log("Remember:", memoryCandidate.remember);
   console.log("Category:", memoryCandidate.category || "none");
+  console.log("Importance:", memoryCandidate.importance || "low");
+  console.log("Confidence:", memoryCandidate.confidence ?? 0);
+  console.log("Sensitivity:", memoryCandidate.sensitivity || "safe");
   console.log("Summary:", memoryCandidate.summary || "");
   console.log("Reason:", memoryCandidate.reason || "");
   console.log("────────────────────────────\n");
+};
+
+const normalizeImportance = (importance) => {
+  if (["low", "medium", "high"].includes(importance)) {
+    return importance;
+  }
+
+  return "low";
+};
+
+const normalizeSensitivity = (sensitivity) => {
+  if (["safe", "sensitive", "blocked"].includes(sensitivity)) {
+    return sensitivity;
+  }
+
+  return "safe";
+};
+
+const normalizeConfidence = (confidence) => {
+  if (typeof confidence !== "number" || Number.isNaN(confidence)) {
+    return 0;
+  }
+
+  if (confidence < 0) {
+    return 0;
+  }
+
+  if (confidence > 1) {
+    return 1;
+  }
+
+  return confidence;
 };
 
 const parseMemoryCandidate = (rawText) => {
@@ -886,6 +921,9 @@ const parseMemoryCandidate = (rawText) => {
         remember: parsed.remember,
         category:
           typeof parsed.category === "string" ? parsed.category : "none",
+        importance: normalizeImportance(parsed.importance),
+        confidence: normalizeConfidence(parsed.confidence),
+        sensitivity: normalizeSensitivity(parsed.sensitivity),
         summary: typeof parsed.summary === "string" ? parsed.summary : "",
         reason: typeof parsed.reason === "string" ? parsed.reason : "",
       };
@@ -923,10 +961,18 @@ You classify whether a user message contains information worth remembering for f
 Return ONLY valid compact JSON. No markdown. No explanation.
 
 Use exactly this shape:
-{"remember":false,"category":"none","summary":"","reason":""}
+{"remember":false,"category":"none","importance":"low","confidence":0,"sensitivity":"safe","summary":"","reason":""}
 
 Allowed categories:
 relationship, family, work, study, goal, fear, habit, preference, project, life_event, other, none.
+
+Allowed importance values:
+low, medium, high.
+
+Allowed sensitivity values:
+safe, sensitive, blocked.
+
+Confidence must be a number from 0 to 1.
 
 Remember only durable or useful personal context, such as:
 - important people: girlfriend, boyfriend, wife, husband, mother, father, sibling, close friend
@@ -936,8 +982,6 @@ Remember only durable or useful personal context, such as:
 - strong preferences that may matter later
 - important life events
 - long-term projects
-- Attraction preferences, religious beliefs
-- Mental health issues, drug use, alcohol use, smoking, etc.
 
 Do NOT remember:
 - random one-time food mentions
@@ -945,6 +989,19 @@ Do NOT remember:
 - temporary mood unless it is clearly part of a pattern
 - sensitive medical, political, religious, sexual, or highly private identity details unless the user clearly wants it remembered
 - exact secrets, passwords, API keys, addresses, or private credentials
+
+Sensitivity rules:
+- Use "safe" for normal personalization context.
+- Use "sensitive" for emotionally important but not blocked context, such as breakup, family conflict, fear, grief, or personal struggle.
+- Use "blocked" for secrets, passwords, API keys, addresses, exact credentials, explicit sexual details, highly private identity details, or anything that should not be stored.
+
+Importance rules:
+- Use "low" for weak preferences or one-off interests.
+- Use "medium" for repeated preferences, goals, study/work context, or meaningful personal context.
+- Use "high" for important relationships, major life events, repeated struggles, major goals, or context that would strongly shape future conversations.
+
+If sensitivity is "blocked", remember must be false.
+If confidence is below 0.55, remember should usually be false.
 `,
       input: `
 Recent conversation:
@@ -972,6 +1029,9 @@ ${message}
     return {
       remember: false,
       category: "none",
+      importance: "low",
+      confidence: 0,
+      sensitivity: "safe",
       summary: "",
       reason: "Memory classifier returned invalid JSON.",
     };
