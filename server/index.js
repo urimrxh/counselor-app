@@ -18,6 +18,8 @@ const openai = OPENAI_API_KEY
 app.use(cors());
 app.use(express.json());
 
+const localMemoryCandidateQueue = [];
+
 const fallbackReplies = [
   "The brain is not plugged in yet, so I am running on fallback replies. But fine, give me the backstory.",
   "No API key found yet. The brain is not plugged in. Say the messy version anyway.",
@@ -848,23 +850,6 @@ const generateDryConversationReplies = async ({ message, recentMessages }) => {
   }
 };
 
-const logMemoryCandidate = ({ conversationId, memoryCandidate }) => {
-  if (!memoryCandidate) {
-    return;
-  }
-
-  console.log("\n🧠 MEMORY CANDIDATE");
-  console.log("Conversation:", conversationId || "missing-conversation-id");
-  console.log("Remember:", memoryCandidate.remember);
-  console.log("Category:", memoryCandidate.category || "none");
-  console.log("Importance:", memoryCandidate.importance || "low");
-  console.log("Confidence:", memoryCandidate.confidence ?? 0);
-  console.log("Sensitivity:", memoryCandidate.sensitivity || "safe");
-  console.log("Summary:", memoryCandidate.summary || "");
-  console.log("Reason:", memoryCandidate.reason || "");
-  console.log("────────────────────────────\n");
-};
-
 const normalizeImportance = (importance) => {
   if (["low", "medium", "high"].includes(importance)) {
     return importance;
@@ -934,6 +919,155 @@ const parseMemoryCandidate = (rawText) => {
   }
 
   return null;
+};
+
+const getMemoryDecision = (memoryCandidate) => {
+  if (!memoryCandidate) {
+    return {
+      status: "rejected",
+      reason: "No memory candidate was produced.",
+    };
+  }
+
+  if (memoryCandidate.sensitivity === "blocked") {
+    return {
+      status: "blocked",
+      reason: "Candidate contains blocked sensitive or private information.",
+    };
+  }
+
+  if (!memoryCandidate.remember) {
+    return {
+      status: "rejected",
+      reason: "Classifier marked this as not worth remembering.",
+    };
+  }
+
+  if (!memoryCandidate.summary || memoryCandidate.summary.trim().length === 0) {
+    return {
+      status: "rejected",
+      reason: "Candidate has no usable summary.",
+    };
+  }
+
+  if (memoryCandidate.confidence < 0.55) {
+    return {
+      status: "rejected",
+      reason: "Confidence is too low.",
+    };
+  }
+
+  if (
+    memoryCandidate.importance === "high" &&
+    memoryCandidate.confidence >= 0.65
+  ) {
+    return {
+      status: "accepted",
+      reason: "High-importance memory with sufficient confidence.",
+    };
+  }
+
+  if (
+    memoryCandidate.importance === "medium" &&
+    memoryCandidate.confidence >= 0.7
+  ) {
+    return {
+      status: "accepted",
+      reason: "Medium-importance memory with sufficient confidence.",
+    };
+  }
+
+  if (
+    memoryCandidate.importance === "low" &&
+    memoryCandidate.confidence >= 0.85 &&
+    memoryCandidate.category !== "preference"
+  ) {
+    return {
+      status: "accepted",
+      reason: "Low-importance but high-confidence non-preference memory.",
+    };
+  }
+
+  return {
+    status: "pending",
+    reason:
+      "Candidate may be useful, but should be confirmed or repeated before permanent storage.",
+  };
+};
+
+const enqueueMemoryCandidate = ({
+  conversationId,
+  message,
+  memoryCandidate,
+  decision,
+}) => {
+  const queueItem = {
+    id: `memory_candidate_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+    conversationId: conversationId || "missing-conversation-id",
+    sourceMessage: message,
+    candidate: memoryCandidate,
+    decision,
+    createdAt: new Date().toISOString(),
+  };
+
+  localMemoryCandidateQueue.push(queueItem);
+
+  if (localMemoryCandidateQueue.length > 100) {
+    localMemoryCandidateQueue.shift();
+  }
+
+  return queueItem;
+};
+
+const logMemoryCandidate = ({ conversationId, memoryCandidate, decision }) => {
+  if (!memoryCandidate) {
+    return;
+  }
+
+  console.log("\n🧠 MEMORY CANDIDATE");
+  console.log("Conversation:", conversationId || "missing-conversation-id");
+  console.log("Remember:", memoryCandidate.remember);
+  console.log("Category:", memoryCandidate.category || "none");
+  console.log("Importance:", memoryCandidate.importance || "low");
+  console.log("Confidence:", memoryCandidate.confidence ?? 0);
+  console.log("Sensitivity:", memoryCandidate.sensitivity || "safe");
+  console.log("Summary:", memoryCandidate.summary || "");
+  console.log("Reason:", memoryCandidate.reason || "");
+
+  if (decision) {
+    console.log("Decision:", decision.status);
+    console.log("Decision reason:", decision.reason);
+  }
+
+  console.log("Queue size:", localMemoryCandidateQueue.length);
+  console.log("────────────────────────────\n");
+};
+
+const processMemoryCandidate = ({
+  conversationId,
+  message,
+  memoryCandidate,
+}) => {
+  if (!memoryCandidate) {
+    return null;
+  }
+
+  const decision = getMemoryDecision(memoryCandidate);
+
+  const queueItem = enqueueMemoryCandidate({
+    conversationId,
+    message,
+    memoryCandidate,
+    decision,
+  });
+
+  logMemoryCandidate({
+    conversationId,
+    memoryCandidate,
+    decision,
+  });
+
+  return queueItem;
 };
 
 const detectMemoryCandidate = async ({ message, recentMessages }) => {
@@ -1058,6 +1192,13 @@ app.get("/", (req, res) => {
   });
 });
 
+app.get("/debug/memory-candidates", (req, res) => {
+  res.json({
+    count: localMemoryCandidateQueue.length,
+    candidates: localMemoryCandidateQueue,
+  });
+});
+
 app.post("/chat", async (req, res) => {
   const { conversationId, message, recentMessages } = req.body;
 
@@ -1071,7 +1212,11 @@ app.post("/chat", async (req, res) => {
   console.log("Conversation ID:", conversationId || "missing-conversation-id");
 
   detectMemoryCandidate({ message, recentMessages }).then((memoryCandidate) => {
-    logMemoryCandidate({ conversationId, memoryCandidate });
+    processMemoryCandidate({
+      conversationId,
+      message,
+      memoryCandidate,
+    });
   });
 
   if (isSimpleGreeting(message)) {
