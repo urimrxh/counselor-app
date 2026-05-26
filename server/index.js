@@ -1009,7 +1009,10 @@ const getMemoryDecision = (memoryCandidate) => {
 };
 
 const normalizeMemorySummary = (summary) => {
-  return summary.toLowerCase().trim().replace(/\s+/g, " ");
+  return String(summary || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
 };
 
 const memoryAlreadyExists = ({ conversationId, category, summary }) => {
@@ -1085,6 +1088,24 @@ const getRelevantMemoryContext = ({ conversationId }) => {
   }
 
   return relevantMemories.map((item) => `- ${item.summary}`).join("\n");
+};
+
+const findMemoryCandidateById = (candidateId) => {
+  return localMemoryCandidateQueue.find((item) => item.id === candidateId);
+};
+
+const findMemoryItemById = (memoryId) => {
+  return localMemoryItems.find((item) => item.id === memoryId);
+};
+
+const updateMemoryCandidateDecision = ({ queueItem, status, reason }) => {
+  queueItem.decision = {
+    status,
+    reason,
+    reviewedAt: new Date().toISOString(),
+  };
+
+  return queueItem;
 };
 
 const enqueueMemoryCandidate = ({
@@ -1299,10 +1320,122 @@ app.get("/debug/memory-candidates", (req, res) => {
   });
 });
 
+app.post("/debug/memory-candidates/:id/accept", (req, res) => {
+  const queueItem = findMemoryCandidateById(req.params.id);
+
+  if (!queueItem) {
+    return res.status(404).json({
+      error: "Memory candidate not found.",
+    });
+  }
+
+  const memoryCandidate = queueItem.candidate;
+
+  if (!memoryCandidate) {
+    return res.status(400).json({
+      error: "Memory candidate is missing candidate data.",
+    });
+  }
+
+  if (!memoryCandidate.summary || memoryCandidate.summary.trim().length === 0) {
+    return res.status(400).json({
+      error: "Memory candidate has no usable summary.",
+    });
+  }
+
+  if (memoryCandidate.sensitivity === "blocked") {
+    updateMemoryCandidateDecision({
+      queueItem,
+      status: "blocked",
+      reason: "Blocked candidates cannot be manually accepted.",
+    });
+
+    return res.status(400).json({
+      error: "Blocked memory candidates cannot be accepted.",
+      candidate: queueItem,
+    });
+  }
+
+  const existingMemoryAlreadyExists = memoryAlreadyExists({
+    conversationId: queueItem.conversationId,
+    category: memoryCandidate.category,
+    summary: memoryCandidate.summary,
+  });
+
+  const memoryItem = existingMemoryAlreadyExists
+    ? null
+    : addAcceptedMemoryItem({
+        conversationId: queueItem.conversationId,
+        memoryCandidate,
+        sourceMessage: queueItem.sourceMessage,
+      });
+
+  updateMemoryCandidateDecision({
+    queueItem,
+    status: "accepted",
+    reason: existingMemoryAlreadyExists
+      ? "Manually accepted, but matching memory already exists."
+      : "Manually accepted from debug review.",
+  });
+
+  return res.json({
+    status: "ok",
+    action: "accepted",
+    alreadyStored: existingMemoryAlreadyExists,
+    candidate: queueItem,
+    memory: memoryItem,
+  });
+});
+
+app.post("/debug/memory-candidates/:id/reject", (req, res) => {
+  const queueItem = findMemoryCandidateById(req.params.id);
+
+  if (!queueItem) {
+    return res.status(404).json({
+      error: "Memory candidate not found.",
+    });
+  }
+
+  updateMemoryCandidateDecision({
+    queueItem,
+    status: "rejected",
+    reason: "Manually rejected from debug review.",
+  });
+
+  return res.json({
+    status: "ok",
+    action: "rejected",
+    candidate: queueItem,
+  });
+});
+
 app.get("/debug/memories", (req, res) => {
   res.json({
     count: localMemoryItems.length,
     memories: localMemoryItems,
+  });
+});
+
+app.delete("/debug/memories/:id", (req, res) => {
+  const memoryItem = findMemoryItemById(req.params.id);
+
+  if (!memoryItem) {
+    return res.status(404).json({
+      error: "Memory item not found.",
+    });
+  }
+
+  const memoryIndex = localMemoryItems.findIndex(
+    (item) => item.id === req.params.id,
+  );
+
+  const deletedMemory = localMemoryItems.splice(memoryIndex, 1)[0];
+
+  return res.json({
+    status: "ok",
+    action: "deleted",
+    memory: deletedMemory,
+    count: localMemoryItems.length,
   });
 });
 
